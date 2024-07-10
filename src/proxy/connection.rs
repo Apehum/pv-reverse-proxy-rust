@@ -21,18 +21,16 @@ impl VoiceProxyConnection {
     }
 
     pub async fn listen(&self) -> io::Result<()> {
+        let sleep = tokio::time::sleep(Duration::from_secs(20));
+        tokio::pin!(sleep);
+        
         loop {
-            let sleep = tokio::time::sleep(Duration::from_secs(20));
-            tokio::pin!(sleep);
-            
             tokio::select! {
                 _ = &mut sleep => {
                     return Err(io::Error::new(ErrorKind::TimedOut, "Connection timed out"));
                 }
 
-                _ = self.server_socket.readable() => {
-                    drop(sleep);
-                }
+                _ = self.server_socket.readable() => {}
             }
 
             let mut buf = Vec::with_capacity(1500);

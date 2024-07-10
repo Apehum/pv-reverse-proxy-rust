@@ -43,30 +43,31 @@ impl VoiceProxy {
             if let Entry::Vacant(entry) = self.clients.entry(voice_packet.secret) {
                 println!("New connection {:?}", client_address);
 
-                entry.insert(Arc::new(
+                let connection = Arc::new(
                     VoiceProxyConnection::new(
                         self.socket.clone(),
                         voice_packet.secret,
                         client_address,
                         "127.0.0.1:25565".to_socket_addrs()?.next().unwrap() // todo: ??
                     ).await?
-                ));
+                );
+                entry.insert(connection.clone());
+
+                let proxy = self.clone();
+                tokio::spawn(async move {
+                    _ = connection.listen().await;
+                    proxy.clients.remove(&connection.secret);
+                    println!("Connection {:?} removed", connection.client_address);
+                });
             }
 
             let connection = if let Some(connection) = self.clients.get(&voice_packet.secret) {
-                connection.clone()
+                connection
             } else {
                 continue
             };
 
             connection.send_to_server(packet).await?;
-
-            let proxy = self.clone();
-            tokio::spawn(async move {
-                _ = connection.listen().await;
-                proxy.clients.remove(&connection.secret);
-                println!("Connection {:?} removed", connection.client_address);
-            });
         }
     }
 
