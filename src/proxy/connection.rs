@@ -7,12 +7,12 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VoiceProxyConnection {
     proxy_socket: Arc<UdpSocket>,
+    server_socket: Arc<UdpSocket>,
     pub secret: Uuid,
     pub client_address: SocketAddr,
-    server_socket: UdpSocket
 }
 
 impl VoiceProxyConnection {
@@ -67,9 +67,9 @@ impl VoiceProxyConnection {
         Ok(
             VoiceProxyConnection {
                 proxy_socket,
+                server_socket: Arc::new(server_socket),
                 secret,
-                client_address,
-                server_socket
+                client_address
             }
         )
     }

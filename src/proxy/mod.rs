@@ -1,9 +1,12 @@
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 
-use dashmap::{DashMap, Entry};
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::packet::VoicePacketWrapper;
@@ -11,16 +14,34 @@ use crate::proxy::connection::VoiceProxyConnection;
 
 mod connection;
 
-#[derive(Clone)]
 pub struct VoiceProxy {
     socket: Arc<UdpSocket>,
-    clients: Arc<DashMap<Uuid, Arc<VoiceProxyConnection>>>
+    clients: HashMap<Uuid, VoiceProxyConnection>
+}
+
+enum ConnectionMessage {
+    Removed(Uuid)
 }
 
 impl VoiceProxy {
     pub async fn listen(&mut self) -> io::Result<()> {
         loop {
-            self.socket.readable().await?;
+            let (tx, mut rx) = mpsc::channel::<ConnectionMessage>(100);
+
+            tokio::select! {
+                result = self.socket.readable() => { result? }
+                
+                Some(message) = rx.recv() => {
+                    
+                    match message {
+                        ConnectionMessage::Removed(secret) => {
+                            self.clients.remove(&secret);       
+                        }
+                    }
+                    
+                    continue;
+                }
+            }
 
             let mut buf = Vec::with_capacity(1500);
             let (packet, client_address) = match self.socket.try_recv_buf_from(&mut buf) {
@@ -43,20 +64,19 @@ impl VoiceProxy {
             if let Entry::Vacant(entry) = self.clients.entry(voice_packet.secret) {
                 println!("New connection {:?}", client_address);
 
-                let connection = Arc::new(
-                    VoiceProxyConnection::new(
-                        self.socket.clone(),
-                        voice_packet.secret,
-                        client_address,
-                        "127.0.0.1:25565".to_socket_addrs()?.next().unwrap() // todo: ??
-                    ).await?
-                );
+                let connection = VoiceProxyConnection::new(
+                    self.socket.clone(),
+                    voice_packet.secret,
+                    client_address,
+                    "127.0.0.1:25565".to_socket_addrs()?.next().unwrap() // todo: ??
+                ).await?;
                 entry.insert(connection.clone());
 
-                let proxy = self.clone();
+                let tx1 = tx.clone();
+                
                 tokio::spawn(async move {
                     _ = connection.listen().await;
-                    proxy.clients.remove(&connection.secret);
+                    _ = tx1.send(ConnectionMessage::Removed(connection.secret));
                     println!("Connection {:?} removed", connection.client_address);
                 });
             }
@@ -76,7 +96,7 @@ impl VoiceProxy {
 
         let proxy = Self {
             socket: Arc::new(socket),
-            clients: Arc::new(DashMap::new())
+            clients: HashMap::new()
         };
 
         Ok(proxy)
