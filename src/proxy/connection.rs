@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use uuid::Uuid;
 
+#[derive(Debug)]
 pub struct VoiceProxyConnection {
     proxy_socket: Arc<UdpSocket>,
     pub secret: Uuid,
@@ -21,16 +22,18 @@ impl VoiceProxyConnection {
     }
 
     pub async fn listen(&self) -> io::Result<()> {
-        let sleep = tokio::time::sleep(Duration::from_secs(20));
-        tokio::pin!(sleep);
-        
         loop {
+            let sleep = tokio::time::sleep(Duration::from_secs(20));
+            tokio::pin!(sleep);
+            
             tokio::select! {
                 _ = &mut sleep => {
                     return Err(io::Error::new(ErrorKind::TimedOut, "Connection timed out"));
                 }
 
-                _ = self.server_socket.readable() => {}
+                _ = self.server_socket.readable() => {
+                    drop(sleep)
+                }
             }
 
             let mut buf = Vec::with_capacity(1500);
